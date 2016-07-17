@@ -16,7 +16,7 @@ class CXImageDlg : public CDialogEx
         double GetValue ( CEdit &edit ) {
             CString tmp;
             edit.GetWindowText ( tmp );
-            return  _wtoi ( tmp );
+            return  _wtof ( tmp );
         }
 
 // Dialog Data
@@ -32,7 +32,7 @@ class CXImageDlg : public CDialogEx
     protected:
         HICON m_hIcon;
         CImage m_CImg;
-        unsigned int y_pixel_size, x_pixel_size;
+        double y_pixel_size, x_pixel_size;
         std::vector<CString>gcode;
         CString m_ImageFilename;
         // Generated message map functions
@@ -59,4 +59,6 @@ class CXImageDlg : public CDialogEx
         CButton m_ConvertButton;
         CButton m_SaveButton;
         afx_msg void OnDestroy();
+        CEdit m_Pixel_X_Size;
+        CEdit m_Pixel_Y_Size;
 };

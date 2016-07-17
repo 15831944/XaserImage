@@ -292,6 +292,8 @@ void CXImageDlg::DoDataExchange ( CDataExchange* pDX )
     DDX_Control ( pDX, IDC_UPPER_VAL, m_Lower );
     DDX_Control ( pDX, IDC_CONVERT, m_ConvertButton );
     DDX_Control ( pDX, IDC_SAVE, m_SaveButton );
+    DDX_Control ( pDX, IDC_PIXEL_X_SIZE, m_Pixel_X_Size );
+    DDX_Control ( pDX, IDC_PIXEL_Y_SIZE, m_Pixel_Y_Size );
 }
 
 BEGIN_MESSAGE_MAP ( CXImageDlg, CDialogEx )
@@ -312,6 +314,7 @@ END_MESSAGE_MAP()
 BOOL CXImageDlg::OnInitDialog()
 {
     CDialogEx::OnInitDialog();
+    CString tmp;
 
     // Add "About..." menu item to system menu.
 
@@ -338,25 +341,45 @@ BOOL CXImageDlg::OnInitDialog()
     SetIcon ( m_hIcon, TRUE );			// Set big icon
     SetIcon ( m_hIcon, FALSE );		// Set small icon
 
-    // TODO: Add extra initialization here
-    y_pixel_size = 1;
-    x_pixel_size = 1;
 
+    // the idea of this is to be equivalent to the size of one laser dot
+    y_pixel_size = ( ( double ) GetReg ( _T ( "XaserImage" ), _T ( "yPixel" ) ) ) / 1000.0;
+    x_pixel_size = ( ( double ) GetReg ( _T ( "XaserImage" ), _T ( "xPixel" ) ) ) / 1000.0;
+
+    if ( x_pixel_size <= 0 ) {
+        x_pixel_size = 1;
+
+    }
+
+    tmp.Format ( _T ( "%g" ), x_pixel_size );
+    m_Pixel_X_Size.SetWindowText ( tmp );
+
+    if ( y_pixel_size <= 0 ) {
+        y_pixel_size = 1;
+
+    }
+
+    tmp.Format ( _T ( "%g" ), y_pixel_size );
+    m_Pixel_Y_Size.SetWindowText ( tmp );
+
+    // power range 0-100
     m_Scale.SetRange ( 1, 100 );
 
+    // scale image and power
     int value = GetReg ( _T ( "XaserImage" ), _T ( "Scale" ) );
 
+    // clamp it
     value = MAX ( value, 1 );
     value = MIN ( value, 100 );
 
     m_Scale.SetPos ( value );
-    CString tmp;
     tmp.Format ( _T ( "%d" ), value );
 
     m_ScaleValue.SetWindowText ( tmp );
 
     value = GetReg ( _T ( "XaserImage" ), _T ( "Lower" ) );
 
+    // clamp range
     if ( value == 0 ) {
         value = 1;
     }
@@ -367,6 +390,7 @@ BOOL CXImageDlg::OnInitDialog()
 
     value = GetReg ( _T ( "XaserImage" ), _T ( "Upper" ) );
 
+    // clamp upper range
     if ( value == 0 ) {
         value = 100;
     }
@@ -376,7 +400,6 @@ BOOL CXImageDlg::OnInitDialog()
 
     m_SaveButton.ShowWindow ( FALSE );
     m_ConvertButton.ShowWindow ( FALSE );
-
 
     return TRUE;  // return TRUE  unless you set the focus to a control
 }
@@ -457,7 +480,7 @@ void CXImageDlg::OnBnClickedLoadImage()
  */
 void CXImageDlg::OnBnClickedConvert()
 {
-    unsigned long width, height, x, y , end_x ;
+    double width, height, x, y , end_x ;
     COLORREF rgb;
     hsv_t hsv;
     CString output;
@@ -483,8 +506,19 @@ void CXImageDlg::OnBnClickedConvert()
     double upper_value = GetValue ( m_Upper );
     double lower_value = GetValue ( m_Lower );
 
+    x_pixel_size =  GetValue ( m_Pixel_X_Size );
+    y_pixel_size = GetValue ( m_Pixel_Y_Size );
+
+    if ( x_pixel_size <= 0 ) {
+        x_pixel_size = 1;
+    }
+
+    if ( y_pixel_size <= 0 ) {
+        y_pixel_size = 1;
+    }
+
     // progress meter
-    m_Progress.SetRange32 ( 0, height - 1 );
+    m_Progress.SetRange32 ( 0, ( int ) ( height ) - 1 );
 
     double scale;
     scale = m_Scale.GetPos();
@@ -493,7 +527,12 @@ void CXImageDlg::OnBnClickedConvert()
         scale = 1;
     }
 
-    for ( y = 0; y < height; y += y_pixel_size ) {
+    double output_x, output_y;
+
+
+    output_y = 0;
+
+    for ( y = 0; y < height; y ++ ) {
 
         // reset vars from x loop to beginning of line
         end_x = 0;
@@ -501,15 +540,21 @@ void CXImageDlg::OnBnClickedConvert()
 
         // laser off and move to Y position
 
-        output.Format ( _T ( "G0Y%g" ), ( double ) ( y / scale ) );
+        output.Format ( _T ( "G0Y%g" ), ( output_y / scale ) );
         gcode.push_back ( output );
 
-        for ( x = 0; x < width; x += x_pixel_size ) {
+        // move down by laser kerf size
+        output_y += y_pixel_size;
+
+        //reset to beginning of line
+        output_x = 0;
+
+        for ( x = 0; x < width; x ++ ) {
 
             power = 0;
 
-            // get RGB value
-            rgb = m_CImg.GetPixel ( x, y );
+            // get RGB value, x,y is relative to image size
+            rgb = m_CImg.GetPixel ( ( int ) x, ( int ) y );
 
             // convert to HSV
             rgb2hsv ( rgb, &hsv );
@@ -536,7 +581,7 @@ void CXImageDlg::OnBnClickedConvert()
             rgb = RGB ( hsv.value, hsv.value, hsv.value );
 
             // write it back to loaded image
-            m_CImg.SetPixel ( x, y, rgb );
+            m_CImg.SetPixel ( ( int ) x, ( int ) y, rgb );
 
             // if different, write out, unless its the first in a horizontal line
 
@@ -544,7 +589,7 @@ void CXImageDlg::OnBnClickedConvert()
             if ( last_power == -1 ) {
 
                 // move x along.
-                end_x = x;
+                end_x = output_x;
 
                 // remember power
                 last_power = power;
@@ -559,10 +604,10 @@ void CXImageDlg::OnBnClickedConvert()
 
                     // decide to write as Z or S command, Z lets you see it in all the GCODE simulators
                     if ( m_SZ.GetState() == FALSE ) {
-                        output.Format ( _T ( "G1X%gS%0.03g" ), ( double ) ( x / scale ), last_power );
+                        output.Format ( _T ( "G1X%gS%0.03g" ),  ( output_x / scale ), last_power );
 
                     } else {
-                        output.Format ( _T ( "G1X%gZ%0.03g" ), ( double ) ( x / scale ), last_power );
+                        output.Format ( _T ( "G1X%gZ%0.03g" ), ( output_x / scale ), last_power );
                     }
 
                     // save it to the gcode output list
@@ -574,7 +619,7 @@ void CXImageDlg::OnBnClickedConvert()
                 } else {
 
                     // not using at the moment
-                    end_x = x;
+                    end_x = output_x;
                 }
 
             // if power = last power, don't write out a start point.
@@ -591,11 +636,15 @@ void CXImageDlg::OnBnClickedConvert()
 
 
             */
+
+            // move gcode along
+            output_x += x_pixel_size;
         }
+
 
         // have we written out to the end of the line?, if not add it.
         if ( power ) {
-            output.Format ( _T ( "G1X%gS%0.03g" ), ( double ) ( x / scale ), power  );
+            output.Format ( _T ( "G1X%gS%0.03g" ), ( double ) ( output_x / scale ), power  );
             gcode.push_back ( output );
         }
 
@@ -604,8 +653,8 @@ void CXImageDlg::OnBnClickedConvert()
         gcode.push_back ( output );
 
         // update progress
-        if ( ( y % 10 ) == 0 ) {
-            m_Progress.SetPos ( y );
+        if ( ( ( int ) y % 10 ) == 0 ) {
+            m_Progress.SetPos ( ( int ) y );
         }
     }
 
@@ -697,6 +746,10 @@ void CXImageDlg::OnDestroy()
     SetReg ( _T ( "XaserImage" ), _T ( "Scale" ), m_Scale.GetPos() );
     SetReg ( _T ( "XaserImage" ), _T ( "Upper" ), ( DWORD ) GetValue ( m_Upper ) );
     SetReg ( _T ( "XaserImage" ), _T ( "Lower" ), ( DWORD ) GetValue ( m_Lower ) );
+
+    // set these as text instead.
+    SetReg ( _T ( "XaserImage" ), _T ( "xPixel" ), ( DWORD ) ( GetValue ( m_Pixel_X_Size ) * 1000.0 ) );
+    SetReg ( _T ( "XaserImage" ), _T ( "yPixel" ), ( DWORD ) ( GetValue ( m_Pixel_Y_Size ) * 1000.0 ) );
 
     CDialogEx::OnDestroy();
 
